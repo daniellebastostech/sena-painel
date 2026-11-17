@@ -387,12 +387,13 @@ function sair(expirou) {
 
 $("#fLogin").onsubmit = async e => {
   e.preventDefault();
-  const b = $("#lbtn"); b.disabled = true; b.textContent = "Entrando..."; $("#lerr").classList.add("hidden");
+  const b = $("#lbtn"), pw = $("#lp").value; b.disabled = true; b.textContent = "Entrando..."; $("#lerr").classList.add("hidden");
   try {
     const r = await fetch(CFG.URL, {method: "POST", body: JSON.stringify({acao: "login", usuario: $("#lu").value, senha: $("#lp").value})});
     const j = await r.json();
     if (j.error) throw new Error(j.error);
-    entrar({token: j.token, nome: j.nome, perfil: j.perfil});
+    const ses = {token: j.token, nome: j.nome, perfil: j.perfil};
+    if (j.trocar) trocaObrigatoria(ses, pw); else entrar(ses);
   } catch (err) {
     $("#lerr").textContent = /fetch|network|json/i.test(err.message) ? "Não foi possível conectar ao servidor. Verifique a URL e a implantação." : err.message;
     $("#lerr").classList.remove("hidden");
@@ -521,10 +522,9 @@ try { const s = JSON.parse(sessionStorage.getItem("sena_ses")); if (s && s.token
 /* ===== USUÁRIOS E SENHA ===== */
 (function () {
   document.head.insertAdjacentHTML("beforeend", `<style>
-.pw{display:flex;gap:8px;align-items:center}.pw input{flex:1}
 .ua{white-space:nowrap}.ua .addb{margin:2px 6px 2px 0}
-.fbar2{display:flex;justify-content:flex-end;margin-top:14px}
-#dlgU .fg{margin-bottom:12px}#dlgU .db{max-height:75vh}
+.fbar2{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:14px}
+#dlgU .fg{margin-bottom:12px}#dlgU .db{max-height:75vh}#umsg .addb{margin-left:8px}
 </style>`);
   Object.assign(IC, {
     key: "M21 2l-2 2m-7.6 7.6a5.5 5.5 0 11-7.78 7.78 5.5 5.5 0 017.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4",
@@ -540,16 +540,19 @@ try { const s = JSON.parse(sessionStorage.getItem("sena_ses")); if (s && s.token
 
   let U = [];
   const F = (n, l, t = "text", v = "", ex = "") => `<div class="fg"><label>${l}<input name="${n}" type="${t}" value="${esc(v)}" ${ex}></label></div>`;
-  const perfilSel = p => `<div class="fg"><label>Perfil<select name="perfil"><option value="operador" ${p === "operador" ? "selected" : ""}>Operador (só preenche fichas)</option><option value="admin" ${p === "admin" ? "selected" : ""}>Administrador (painel, usuários e fichas)</option></select></label></div>`;
-  const pwField = (l = "Senha (mínimo 8 caracteres)") => `<div class="fg"><label>${l}<div class="pw"><input name="senha" id="uPw" required minlength="8" autocomplete="new-password"><button type="button" class="addb" id="uGen">Gerar</button></div></label></div>`;
-  const gen = () => { const a = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789"; return [...crypto.getRandomValues(new Uint32Array(12))].map(x => a[x % a.length]).join(""); };
+  const perfilSel = `<div class="fg"><label>Perfil<select name="perfil"><option value="operador">Operador (só preenche fichas)</option><option value="admin">Administrador (painel e usuários)</option></select></label></div>`;
   const msg = (t, er) => { const m = $("#umsg"); m.className = "msg" + (er ? " er" : ""); m.textContent = t; };
+  const senhaMsg = (t, s) => {
+    const m = $("#umsg"); m.className = "msg";
+    m.innerHTML = `${esc(t)} <b>${esc(s)}</b><button type="button" class="addb" id="uCp">Copiar</button><br><small>Aparece só agora. No primeiro acesso a pessoa será obrigada a trocar por uma senha que só ela conhece.</small>`;
+    $("#uCp").onclick = () => { if (navigator.clipboard) navigator.clipboard.writeText(s).then(() => { $("#uCp").textContent = "Copiado"; }); };
+  };
 
-  function dlg(titulo, corpo, onOk, okTxt) {
+  function dlg(titulo, corpo, onOk, okTxt, obrig) {
     const d = $("#dlgU");
-    d.innerHTML = `<div class="dh"><div><h2>${titulo}</h2></div><button type="button" id="uX">✕</button></div><form class="db" id="uF">${corpo}<div id="uE"></div><div class="fbar2"><button class="btn" id="uOk">${okTxt || "Salvar"}</button></div></form>`;
-    $("#uX").onclick = () => d.close();
-    if ($("#uGen")) $("#uGen").onclick = () => { $("#uPw").value = gen(); };
+    d.innerHTML = `<div class="dh"><div><h2>${titulo}</h2></div>${obrig ? "" : `<button type="button" id="uX">✕</button>`}</div><form class="db" id="uF">${corpo}<div id="uE"></div><div class="fbar2">${obrig ? `<button type="button" class="addb" id="uSair">Cancelar e sair</button>` : "<span></span>"}<button class="btn" id="uOk">${okTxt || "Salvar"}</button></div></form>`;
+    d.oncancel = obrig ? ev => ev.preventDefault() : null;
+    if (obrig) $("#uSair").onclick = () => sair(); else $("#uX").onclick = () => d.close();
     $("#uF").onsubmit = async e => {
       e.preventDefault();
       const b = $("#uOk"); b.disabled = true;
@@ -558,6 +561,18 @@ try { const s = JSON.parse(sessionStorage.getItem("sena_ses")); if (s && s.token
     };
     d.showModal();
   }
+
+  window.trocaObrigatoria = (s, atual) => {
+    SES = s;
+    dlg("Crie a sua senha", `<p class="lead">Este é o seu primeiro acesso, ou a sua senha foi redefinida. Escolha uma senha nova, que só você conhece, para continuar.</p>` +
+      F("nova", "Nova senha (mínimo 8 caracteres)", "password", "", `required minlength="8" autocomplete="new-password"`) + F("rep", "Repita a nova senha", "password", "", `required autocomplete="new-password"`),
+      async fd => {
+        if (fd.get("nova") !== fd.get("rep")) throw new Error("As senhas não são iguais.");
+        if (fd.get("nova") === atual) throw new Error("Escolha uma senha diferente da provisória.");
+        await api("alterarMinhaSenha", {atual: atual, nova: fd.get("nova")});
+        entrar(s);
+      }, "Salvar e entrar", true);
+  };
 
   async function carrega() {
     $("#ulist").innerHTML = `<tr><td colspan="5">Carregando...</td></tr>`;
@@ -571,31 +586,36 @@ try { const s = JSON.parse(sessionStorage.getItem("sena_ses")); if (s && s.token
   function desenha() {
     $("#ulist").innerHTML = U.map(u => {
       const eu = u.usuario === SES.user, k = esc(u.usuario);
-      return `<tr><td><b>${k}</b>${eu ? ` <span class="badge ok">você</span>` : ""}</td><td>${esc(u.nome)}</td><td>${u.perfil === "admin" ? "Administrador" : "Operador"}</td><td><span class="badge ${u.ativo ? "ok" : ""}">${u.ativo ? "Ativo" : "Desativado"}</span></td><td class="ua"><button class="addb" data-a="ed" data-u="${k}">Editar</button><button class="addb" data-a="pw" data-u="${k}">Nova senha</button>${eu ? "" : `<button class="addb" data-a="at" data-u="${k}">${u.ativo ? "Desativar" : "Ativar"}</button>`}</td></tr>`;
+      const st = !u.ativo ? "Bloqueado" : u.trocar ? "Aguardando 1º acesso" : "Ativo";
+      return `<tr><td><b>${k}</b>${eu ? ` <span class="badge ok">você</span>` : ""}</td><td>${esc(u.nome)}</td><td>${u.perfil === "admin" ? "Administrador" : "Operador"}</td><td><span class="badge ${st === "Ativo" ? "ok" : ""}">${st}</span></td><td class="ua">${eu ? "" : `<button class="addb" data-a="pw" data-u="${k}">Nova senha provisória</button><button class="addb" data-a="del" data-u="${k}">Excluir</button>`}</td></tr>`;
     }).join("");
   }
 
   $("#bNovoU").onclick = () => dlg("Novo usuário",
-    F("usuario", "Usuário (login, em minúsculas)", "text", "", `required pattern="[a-z0-9._-]{3,30}" autocapitalize="none"`) + F("nome", "Nome completo", "text", "", "required") + perfilSel("operador") + pwField(),
+    `<p class="lead">O sistema cria uma senha provisória. Ela aparece só uma vez, e a pessoa será obrigada a trocá-la no primeiro acesso.</p>` +
+    F("usuario", "Usuário (login, em minúsculas)", "text", "", `required pattern="[a-z0-9._-]{3,30}" autocapitalize="none"`) + F("nome", "Nome completo", "text", "", "required") + perfilSel,
     async fd => {
-      const u = fd.get("usuario").trim().toLowerCase(), s = fd.get("senha");
-      await api("novoUsuario", {usuario: u, nome: fd.get("nome"), perfil: fd.get("perfil"), senha: s});
-      msg(`Usuário criado. Passe ao funcionário o login "${u}" e a senha "${s}". Ele pode trocar em "Alterar minha senha".`);
+      const r = await api("novoUsuario", {usuario: fd.get("usuario").trim().toLowerCase(), nome: fd.get("nome"), perfil: fd.get("perfil")});
+      senhaMsg(`Usuário "${r.usuario}" criado. Senha provisória:`, r.senhaProvisoria);
       await carrega();
     }, "Criar usuário");
 
-  $("#ulist").onclick = e => {
+  $("#ulist").onclick = async e => {
     const b = e.target.closest("[data-a]"); if (!b) return;
     const u = U.find(x => x.usuario === b.dataset.u); if (!u) return;
-    if (b.dataset.a === "ed") dlg("Editar usuário", `<p class="lead">Login: <b>${esc(u.usuario)}</b></p>` + F("nome", "Nome completo", "text", u.nome, "required") + perfilSel(u.perfil),
-      async fd => { await api("editarUsuario", {usuario: u.usuario, nome: fd.get("nome"), perfil: fd.get("perfil")}); msg("Usuário atualizado."); await carrega(); });
-    if (b.dataset.a === "pw") dlg("Nova senha de " + esc(u.nome), `<p class="lead">O usuário será desconectado e precisará entrar com a nova senha.</p>` + pwField("Nova senha (mínimo 8 caracteres)"),
-      async fd => { const s = fd.get("senha"); await api("redefinirSenha", {usuario: u.usuario, senha: s}); msg(`Senha de "${u.usuario}" redefinida. Nova senha: ${s}`); }, "Redefinir senha");
-    if (b.dataset.a === "at") {
-      if (!confirm(u.ativo ? `Desativar ${u.nome}? Ele será desconectado e não conseguirá entrar.` : `Reativar ${u.nome}?`)) return;
-      const novo = !u.ativo;
-      api("ativarUsuario", {usuario: u.usuario, ativo: novo}).then(() => { msg(novo ? "Usuário ativado." : "Usuário desativado."); return carrega(); }).catch(er => msg(er.message, 1));
-    }
+    try {
+      if (b.dataset.a === "pw") {
+        if (!confirm(`Gerar nova senha provisória para ${u.nome}? A senha atual deixa de funcionar e a pessoa será desconectada.`)) return;
+        const r = await api("novaSenhaProvisoria", {usuario: u.usuario});
+        senhaMsg(`Nova senha provisória de "${u.usuario}":`, r.senhaProvisoria);
+      }
+      if (b.dataset.a === "del") {
+        if (!confirm(`Excluir ${u.nome}? Essa ação não pode ser desfeita.`)) return;
+        await api("excluirUsuario", {usuario: u.usuario});
+        msg("Usuário excluído.");
+      }
+      await carrega();
+    } catch (er) { msg(er.message, 1); }
   };
 
   $("#mSenha").onclick = () => dlg("Alterar minha senha",
